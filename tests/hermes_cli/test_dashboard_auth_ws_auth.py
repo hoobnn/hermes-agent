@@ -51,9 +51,11 @@ def gated_app():
     prev_host = getattr(web_server.app.state, "bound_host", None)
     prev_port = getattr(web_server.app.state, "bound_port", None)
     prev_required = getattr(web_server.app.state, "auth_required", None)
+    prev_allow_public = getattr(web_server.app.state, "allow_public", None)
     web_server.app.state.bound_host = "fly-app.fly.dev"
     web_server.app.state.bound_port = 443
     web_server.app.state.auth_required = True
+    web_server.app.state.allow_public = False
     client = TestClient(web_server.app, base_url="https://fly-app.fly.dev")
     yield client
     clear_providers()
@@ -61,6 +63,8 @@ def gated_app():
     web_server.app.state.bound_host = prev_host
     web_server.app.state.bound_port = prev_port
     web_server.app.state.auth_required = prev_required
+    if prev_allow_public is not None:
+        web_server.app.state.allow_public = prev_allow_public
 
 
 @pytest.fixture
@@ -71,15 +75,19 @@ def loopback_app():
     prev_host = getattr(web_server.app.state, "bound_host", None)
     prev_port = getattr(web_server.app.state, "bound_port", None)
     prev_required = getattr(web_server.app.state, "auth_required", None)
+    prev_allow_public = getattr(web_server.app.state, "allow_public", None)
     web_server.app.state.bound_host = "127.0.0.1"
     web_server.app.state.bound_port = 8080
     web_server.app.state.auth_required = False
+    web_server.app.state.allow_public = False
     client = TestClient(web_server.app, base_url="http://127.0.0.1:8080")
     yield client
     _reset_for_tests()
     web_server.app.state.bound_host = prev_host
     web_server.app.state.bound_port = prev_port
     web_server.app.state.auth_required = prev_required
+    if prev_allow_public is not None:
+        web_server.app.state.allow_public = prev_allow_public
 
 
 def _logged_in(client: TestClient) -> None:
@@ -290,6 +298,48 @@ class TestWsRequestIsAllowedGated:
         ws = _fake_ws(query={}, client_host="203.0.113.7")
         ws.headers = {"host": "evil.example.com"}
         assert web_server._ws_request_is_allowed(ws) is False
+
+
+@pytest.fixture
+def insecure_app():
+    """web_server.app configured for insecure/public mode (--insecure)."""
+    _reset_for_tests()
+    clear_providers()
+    prev_host = getattr(web_server.app.state, "bound_host", None)
+    prev_port = getattr(web_server.app.state, "bound_port", None)
+    prev_required = getattr(web_server.app.state, "auth_required", None)
+    prev_allow_public = getattr(web_server.app.state, "allow_public", None)
+    web_server.app.state.bound_host = "0.0.0.0"
+    web_server.app.state.bound_port = 9119
+    web_server.app.state.auth_required = False
+    web_server.app.state.allow_public = True
+    client = TestClient(web_server.app, base_url="http://0.0.0.0:9119")
+    yield client
+    _reset_for_tests()
+    web_server.app.state.bound_host = prev_host
+    web_server.app.state.bound_port = prev_port
+    web_server.app.state.auth_required = prev_required
+    if prev_allow_public is not None:
+        web_server.app.state.allow_public = prev_allow_public
+
+
+class TestWsInsecureMode:
+    """--insecure (--host 0.0.0.0) must allow non-loopback WebSocket clients.
+
+    Regression coverage for issue #33265: when --insecure is passed,
+    _ws_client_is_allowed must accept non-loopback LAN peers, not just
+    loopback.
+    """
+
+    def test_non_loopback_peer_allowed_in_insecure_mode(self, insecure_app):
+        ws = _fake_ws(query={}, client_host="192.168.1.42")
+        ws.headers = {"host": "0.0.0.0:9119"}
+        assert web_server._ws_request_is_allowed(ws) is True
+
+    def test_loopback_peer_allowed_in_insecure_mode(self, insecure_app):
+        ws = _fake_ws(query={}, client_host="127.0.0.1")
+        ws.headers = {"host": "0.0.0.0:9119"}
+        assert web_server._ws_request_is_allowed(ws) is True
 
 
 class TestSidecarUrl:
