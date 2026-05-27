@@ -916,10 +916,26 @@ class WebhookAdapter(BasePlatformAdapter):
                     error=f"No chat_id or home channel for {platform_name}",
                 )
 
-        # Pass thread_id from deliver_extra so Telegram forum topics work
-        metadata = None
+        # Pass thread_id from deliver_extra so Telegram forum topics work.
+        # Also forward Telegram DM topic opt-out flags so webhook operators
+        # can explicitly bypass the reply-anchor guard for private DM topics
+        # (fixes #33375).  Without these, a bare message_thread_id targeting
+        # a private DM topic hits the anchor demand in
+        # TelegramAdapter._is_private_dm_topic_send().
+        metadata: Dict[str, Any] = {}
         thread_id = extra.get("message_thread_id") or extra.get("thread_id")
         if thread_id:
-            metadata = {"thread_id": thread_id}
+            metadata["thread_id"] = thread_id
+        for _k in (
+            "telegram_dm_topic_created_for_send",
+            "direct_messages_topic_id",
+            "telegram_direct_messages_topic_id",
+            "telegram_reply_to_message_id",
+        ):
+            _v = extra.get(_k)
+            if _v is not None:
+                metadata[_k] = _v
+        if not metadata:
+            metadata = None
 
         return await adapter.send(chat_id, content, metadata=metadata)

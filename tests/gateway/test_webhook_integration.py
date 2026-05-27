@@ -269,6 +269,110 @@ class TestCrossPlatformDelivery:
 # ===================================================================
 
 class TestGitHubCommentDelivery:
+    @pytest.mark.asyncio
+    async def test_cross_platform_delivery_forwards_dm_topic_optout_flags(self):
+        """When deliver_extra includes Telegram DM topic opt-out flags,
+        they are forwarded in the metadata dict to the Telegram adapter
+        so the reply-anchor guard can be bypassed (#33375)."""
+        routes = {
+            "dm-topic": {
+                "secret": _INSECURE_NO_AUTH,
+                "prompt": "Update: {message}",
+                "deliver": "telegram",
+                "deliver_extra": {
+                    "chat_id": "99999",
+                    "message_thread_id": "42",
+                    "telegram_dm_topic_created_for_send": True,
+                },
+            }
+        }
+        adapter = _make_adapter(routes)
+        adapter.handle_message = AsyncMock()
+
+        mock_tg_adapter = AsyncMock()
+        mock_tg_adapter.send = AsyncMock(return_value=SendResult(success=True))
+
+        mock_runner = MagicMock()
+        mock_runner.adapters = {Platform.TELEGRAM: mock_tg_adapter}
+        mock_runner.config = GatewayConfig(
+            platforms={Platform.TELEGRAM: PlatformConfig(enabled=True, token="fake")}
+        )
+        adapter.gateway_runner = mock_runner
+
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(
+                "/webhooks/dm-topic",
+                json={"message": "Hello topic"},
+                headers={"X-GitHub-Delivery": "dm-001"},
+            )
+            assert resp.status == 202
+
+        chat_id = "webhook:dm-topic:dm-001"
+        result = await adapter.send(chat_id, "Done.")
+
+        assert result.success is True
+        mock_tg_adapter.send.assert_awaited_once_with(
+            "99999",
+            "Done.",
+            metadata={
+                "thread_id": "42",
+                "telegram_dm_topic_created_for_send": True,
+            },
+        )
+
+    @pytest.mark.asyncio
+    async def test_cross_platform_delivery_forwards_reply_to_message_id(self):
+        """When deliver_extra includes telegram_reply_to_message_id,
+        it is forwarded in metadata so the Telegram adapter can use it
+        as a reply anchor for DM topic sends."""
+        routes = {
+            "anchored": {
+                "secret": _INSECURE_NO_AUTH,
+                "prompt": "Note: {message}",
+                "deliver": "telegram",
+                "deliver_extra": {
+                    "chat_id": "88888",
+                    "message_thread_id": "77",
+                    "telegram_reply_to_message_id": "123456",
+                },
+            }
+        }
+        adapter = _make_adapter(routes)
+        adapter.handle_message = AsyncMock()
+
+        mock_tg_adapter = AsyncMock()
+        mock_tg_adapter.send = AsyncMock(return_value=SendResult(success=True))
+
+        mock_runner = MagicMock()
+        mock_runner.adapters = {Platform.TELEGRAM: mock_tg_adapter}
+        mock_runner.config = GatewayConfig(
+            platforms={Platform.TELEGRAM: PlatformConfig(enabled=True, token="fake")}
+        )
+        adapter.gateway_runner = mock_runner
+
+        app = _create_app(adapter)
+        async with TestClient(TestServer(app)) as cli:
+            resp = await cli.post(
+                "/webhooks/anchored",
+                json={"message": "Anchored msg"},
+                headers={"X-GitHub-Delivery": "anc-001"},
+            )
+            assert resp.status == 202
+
+        chat_id = "webhook:anchored:anc-001"
+        result = await adapter.send(chat_id, "Acknowledged.")
+
+        assert result.success is True
+        mock_tg_adapter.send.assert_awaited_once_with(
+            "88888",
+            "Acknowledged.",
+            metadata={
+                "thread_id": "77",
+                "telegram_reply_to_message_id": "123456",
+            },
+        )
+
 
     @pytest.mark.asyncio
     async def test_github_comment_delivery(self):
