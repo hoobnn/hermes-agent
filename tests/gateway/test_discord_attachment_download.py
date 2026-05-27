@@ -14,6 +14,7 @@ helpers. Verifies that:
   defense-in-depth. (issue #11345)
 """
 
+import asyncio
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -127,6 +128,26 @@ class TestReadAttachmentBytes:
             url="https://cdn.discordapp.com/attachments/fake/file.png",
             filename="file.png",
             read=AsyncMock(side_effect=RuntimeError("403 Forbidden")),
+        )
+
+        result = await adapter._read_attachment_bytes(att)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_read_times_out(self):
+        """A slow CDN read should time out so the URL fallback can still run."""
+        adapter = _make_adapter()
+        adapter._ATTACHMENT_READ_TIMEOUT = 0.05  # 50ms for fast test
+
+        async def _slow_read():
+            await asyncio.sleep(5)  # well beyond the 50ms timeout
+            return b"too late"
+
+        att = SimpleNamespace(
+            url="https://cdn.discordapp.com/attachments/fake/file.png",
+            filename="file.png",
+            read=_slow_read,
         )
 
         result = await adapter._read_attachment_bytes(att)

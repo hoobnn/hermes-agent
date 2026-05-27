@@ -4391,19 +4391,26 @@ class DiscordAdapter(BasePlatformAdapter):
     # non-CDN URL into the ``att.url`` field. (issue #11345)
     # ------------------------------------------------------------------
 
+    # Timeout for the authenticated ``att.read()`` call.  Must be shorter
+    # than the typical Discord signed-URL expiry window (~30-60 s) so the
+    # fallback URL-based downloader still has a valid CDN URL to fetch.
+    _ATTACHMENT_READ_TIMEOUT: float = 15.0
+
     async def _read_attachment_bytes(self, att) -> Optional[bytes]:
         """Read an attachment via discord.py's authenticated bot session.
 
         Returns the raw bytes on success, or ``None`` if ``att`` doesn't
-        expose a callable ``read()`` or the read itself fails. Callers
-        should treat ``None`` as a signal to fall back to the URL-based
-        downloaders.
+        expose a callable ``read()`` or the read itself fails (including
+        timeout).  Callers should treat ``None`` as a signal to fall back
+        to the URL-based downloaders.
         """
         reader = getattr(att, "read", None)
         if reader is None or not callable(reader):
             return None
         try:
-            return await reader()
+            return await asyncio.wait_for(
+                reader(), timeout=self._ATTACHMENT_READ_TIMEOUT
+            )
         except Exception as e:
             logger.warning(
                 "[Discord] Authenticated attachment read failed for %s: %s",
