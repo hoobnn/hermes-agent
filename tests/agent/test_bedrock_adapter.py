@@ -1474,3 +1474,47 @@ class TestCallConverseInvalidatesOnStaleError:
         )
 
         assert _bedrock_runtime_client_cache.get("us-east-1") is live_client
+
+
+class TestClientTimeoutConfig:
+    """Regression: boto3 clients must use custom read_timeout > 60 s default.
+
+    Large-context Converse calls (e.g. after delegate_task returns tens of
+    thousands of characters) can exceed the boto3 default 60 s read timeout.
+    The clients must be created with a ``botocore.Config`` that extends this.
+    See https://github.com/NousResearch/hermes-agent/issues/33457
+    """
+
+    def test_runtime_client_uses_custom_timeout(self):
+        from agent.bedrock_adapter import _get_bedrock_runtime_client, reset_client_cache
+        reset_client_cache()
+        mock_boto3 = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+
+        with patch("agent.bedrock_adapter._require_boto3", return_value=mock_boto3):
+            _get_bedrock_runtime_client("us-east-1")
+
+        mock_boto3.client.assert_called_once()
+        call_kwargs = mock_boto3.client.call_args
+        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
+        assert config is not None, "bedrock-runtime client must pass a botocore.Config"
+        assert config.read_timeout == 300
+        assert config.connect_timeout == 30
+
+    def test_control_client_uses_custom_timeout(self):
+        from agent.bedrock_adapter import _get_bedrock_control_client, reset_client_cache
+        reset_client_cache()
+        mock_boto3 = MagicMock()
+        mock_client = MagicMock()
+        mock_boto3.client.return_value = mock_client
+
+        with patch("agent.bedrock_adapter._require_boto3", return_value=mock_boto3):
+            _get_bedrock_control_client("us-east-1")
+
+        mock_boto3.client.assert_called_once()
+        call_kwargs = mock_boto3.client.call_args
+        config = call_kwargs.kwargs.get("config") or call_kwargs[1].get("config")
+        assert config is not None, "bedrock control client must pass a botocore.Config"
+        assert config.read_timeout == 300
+        assert config.connect_timeout == 30

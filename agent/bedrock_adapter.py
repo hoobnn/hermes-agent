@@ -75,11 +75,18 @@ def _get_bedrock_runtime_client(region: str):
     """Get or create a cached ``bedrock-runtime`` client for the given region.
 
     Uses the default AWS credential chain (env vars → profile → instance role).
+    Applies a custom ``botocore.Config`` with an extended ``read_timeout``
+    (300 s) so that large-context Converse calls (e.g. after ``delegate_task``
+    returns tens of thousands of characters) do not hit the boto3 default of
+    60 s before the first output bytes arrive.  ``connect_timeout`` is set to
+    30 s to fail fast on unreachable endpoints.
     """
     if region not in _bedrock_runtime_client_cache:
         boto3 = _require_boto3()
+        from botocore.config import Config as _BotoConfig
         _bedrock_runtime_client_cache[region] = boto3.client(
             "bedrock-runtime", region_name=region,
+            config=_BotoConfig(read_timeout=300, connect_timeout=30),
         )
     return _bedrock_runtime_client_cache[region]
 
@@ -88,8 +95,10 @@ def _get_bedrock_control_client(region: str):
     """Get or create a cached ``bedrock`` control-plane client for model discovery."""
     if region not in _bedrock_control_client_cache:
         boto3 = _require_boto3()
+        from botocore.config import Config as _BotoConfig
         _bedrock_control_client_cache[region] = boto3.client(
             "bedrock", region_name=region,
+            config=_BotoConfig(read_timeout=300, connect_timeout=30),
         )
     return _bedrock_control_client_cache[region]
 
