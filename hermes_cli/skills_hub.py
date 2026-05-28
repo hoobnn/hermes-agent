@@ -58,7 +58,7 @@ def _resolve_short_name(name: str, sources, console: Console) -> str:
         table = Table()
         table.add_column("Source", style="dim")
         table.add_column("Trust", style="dim")
-        table.add_column("Identifier", style="bold cyan")
+        table.add_column("Identifier", style="bold cyan", overflow="fold")
         for r in exact:
             trust_style = {"builtin": "bright_cyan", "trusted": "green", "community": "yellow"}.get(r.trust_level, "dim")
             trust_label = "official" if r.source == "official" else r.trust_level
@@ -265,7 +265,7 @@ def do_search(query: str, source: str = "all", limit: int = 10,
     table.add_column("Description", max_width=60)
     table.add_column("Source", style="dim")
     table.add_column("Trust", style="dim")
-    table.add_column("Identifier", style="dim")
+    table.add_column("Identifier", style="dim", overflow="fold", min_width=30)
 
     for r in results:
         trust_style = {"builtin": "bright_cyan", "trusted": "green", "community": "yellow"}.get(r.trust_level, "dim")
@@ -279,6 +279,13 @@ def do_search(query: str, source: str = "all", limit: int = 10,
         )
 
     c.print(table)
+    # Print identifiers in a copyable format below the table.
+    # Rich tables may fold long identifiers across lines, making them hard to
+    # select/copy.  A simple numbered list guarantees the full slug is on one
+    # line and easy to copy.  (Fixes #33674)
+    c.print("[dim]Full identifiers (copy any):[/]")
+    for i, r in enumerate(results, 1):
+        c.print(f"  [dim]{i}.[/] [cyan]{r.identifier}[/]")
     c.print("[dim]Use: hermes skills inspect <identifier> to preview, "
             "hermes skills install <identifier> to install[/]\n")
 
