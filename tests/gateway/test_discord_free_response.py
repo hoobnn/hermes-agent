@@ -884,3 +884,38 @@ async def test_discord_dm_does_not_backfill(adapter, monkeypatch):
         assert event.channel_context is None
 
 
+@pytest.mark.asyncio
+async def test_discord_thread_backfill_runs_when_thread_require_mention_false(adapter, monkeypatch):
+    """Backfill must run for known threads even when thread_require_mention=false (default).
+
+    Regression test for #33666: the backfill condition conflated
+    "mention was needed" with "backfill is needed", causing threads
+    to silently lose context when the bot responds freely.
+    """
+    monkeypatch.setenv("DISCORD_REQUIRE_MENTION", "true")
+    monkeypatch.delenv("DISCORD_FREE_RESPONSE_CHANNELS", raising=False)
+    monkeypatch.delenv("DISCORD_THREAD_REQUIRE_MENTION", raising=False)
+    adapter.config.extra["history_backfill"] = True
+    adapter._fetch_channel_context = AsyncMock(
+        return_value="[Recent thread messages]\\n[Alice] context"
+    )
+
+    # Mark thread as known so in_bot_thread evaluates to True
+    thread_channel = FakeThread(channel_id=456, name="support-thread")
+    adapter._threads.mark("456")
+
+    bot_user = adapter._client.user
+    message = make_message(
+        channel=thread_channel,
+        content=f"<@{bot_user.id}> help me",
+        mentions=[bot_user],
+    )
+
+    await adapter._handle_message(message)
+
+    # Backfill should run for threads regardless of mention gating
+    adapter._fetch_channel_context.assert_awaited_once()
+    event = adapter.handle_message.await_args.args[0]
+    assert event.channel_context == "[Recent thread messages]\\n[Alice] context"
+
+
